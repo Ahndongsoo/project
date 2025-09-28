@@ -11,8 +11,7 @@
   .glass{background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.08); backdrop-filter: blur(10px)}
   .focus-ring:focus-visible{outline:3px solid var(--ring); outline-offset:2px; border-radius:12px}
   .bar{width:4px; border-radius:2px; animation:wave 1200ms ease-in-out infinite}
-  .bar:nth-child(odd){animation-delay:300ms}
-  .bar:nth-child(3n){animation-delay:600ms}
+  .bar:nth-child(odd){animation-delay:300ms} .bar:nth-child(3n){animation-delay:600ms}
   @keyframes wave{0%,100%{height:6px} 50%{height:28px}}
   .pulse::after{content:""; position:absolute; inset:-8px; border-radius:9999px; border:2px solid rgba(99,102,241,.5); animation:pulse 1.6s infinite}
   @keyframes pulse{0%{opacity:.7; transform:scale(.9)}70%{opacity:0; transform:scale(1.15)}100%{opacity:0}}
@@ -198,59 +197,214 @@ const highlight = (text, q) => {
 };
 
 /* -----------------------------
-   (1) 유틸 & 간단 동의어 사전  ✅ 추가
-------------------------------*/
-function splitKeywords(q){ return (q||'').split(/[,/ ]+/).map(s=>s.trim()).filter(Boolean); }
-const SYN = {
-  "물":["물","갈증","목마름","입마름","수분","경구수액","ORS"],
-  "복통":["복통","배아픔","속쓰림","위염","명치","상복부","PPI","에소메프라졸","esomeprazole"],
-  "틀니":["틀니","의치","잇몸","구강","씹기","의치압통"],
-  "화장실":["화장실","배뇨","오줌","쉬야","요로","요로감염","UTI"],
-  "허리":["허리","요통"],
-  "약":["약","진통제","아세트아미노펜","acetaminophen","NSAIDs","나프록센","naproxen"],
-  "항생제":["항생제","Ciprofloxacin","시프로플록사신","Cipro"]
-};
-function extractKeywordsFromText(s){
-  const t=(s||'').toLowerCase();
-  const base=[];
-  Object.keys(SYN).forEach(k=>{
-    if([k,...SYN[k].map(x=>x.toLowerCase())].some(w=>t.includes(w))) base.push(k);
-  });
-  const toks=(t.match(/[가-힣A-Za-z0-9]+/g)||[])
-    .filter(x=>x.length>=2)
-    .filter(x=>!['입니다','하세요','그리고','오늘','좀','조금','정말'].includes(x));
-  const bag=Array.from(new Set([...base,...toks])).slice(0,8);
-  const expanded=new Set();
-  bag.forEach(k=>{
-    expanded.add(k);
-    if(SYN[k]) SYN[k].forEach(v=>expanded.add(v.toLowerCase()));
-  });
-  return Array.from(expanded);
-}
-function relevanceToPatient(pid, terms){
-  const P = DEMO[pid]||{rx:[],speech:[]};
-  const blob = [
-    ...P.rx.map(r=>`${r.dx} ${r.drug} ${r.dose} ${r.doctor}`),
-    ...P.speech.map(s=>`${s.text} ${s.context} ${(s.tags||[]).join(' ')}`)
-  ].join(' ').toLowerCase();
-  let score=0;
-  terms.forEach(t=>{ if(blob.includes(t.toLowerCase())) score++; });
-  return score;
-}
-function mergeRagAndRun(terms){
-  const cur = splitKeywords(ragQuery.value.toLowerCase());
-  const merged = Array.from(new Set([...cur, ...terms.map(t=>t.toLowerCase())]))
-    .filter(Boolean).slice(0,10);
-  ragQuery.value = merged.join(', ');
-  runRAG();
-}
-
-/* -----------------------------
-   1) 의도 규칙 (간단 데모) - 원본 그대로
+   1) 의도 규칙 (간단 데모)
 ------------------------------*/
 const KB = [
-  /* ... (생략: 원본 KB 배열 그대로) ... */
-  {"category":"붓기","standard":"다리가 부었어요.","variants":["발/종아리 붓기","푸석푸석 부어요","무겁고 당겨요","한쪽만 부어요","다리 붓는다예","발이 퉁퉁 붓잉","다리 뻐근허네","다리 퉁퉁 부었어유"]}
+  {
+    "category": "통증",
+    "standard": "배가 아파요.",
+    "variants": [
+      "배 아파요","뱃속이 쥐나요","속이 쓰려요","배가 찌릿해요","명치가 아파요","복통이 있어요",
+      "뱃심니 아프다","배가 쥐난다","배가 칼로 쑤셔요","배 아픔","배가 부르다",
+      "배가 시리다예","배가 땡긴다잉","배가 뻐근허네","배 아푸","배가 꼬이는디"
+    ]
+  },
+  {
+    "category": "통증",
+    "standard": "가슴이 답답해요.",
+    "variants": [
+      "가슴 아파요","가슴이 쪼여요","속이 꽉 막혀요","숨 막히는 느낌","명치 답답",
+      "가슴이 턱 막혀","가슴이 뻐근해요","흉통 있어요","가슴답답하이","가슴이 조여온다",
+      "가슴이 땡기네예","가슴이 조매 답답혀잉","가슴이 맥혀부러","가슴이 콱 막혀유"
+    ]
+  },
+  {
+    "category": "호흡곤란",
+    "standard": "숨이 차요.",
+    "variants": [
+      "숨 가빠요","호흡이 힘들어요","헐떡여요","숨이 꽉 막혀요","숨이 안 쉬어져요",
+      "숨허니","숨이 찬다예","숨이 뻐근해요","숨 넘어가겠네","숨이 턱턱 막혀요",
+      "숨이 가뿌다예","숨이 고부러잉","숨이 찬거시여","숨이 히유","숨이 헉헉","숨이 후욱후욱"
+    ]
+  },
+  {
+    "category": "어지럼/실신",
+    "standard": "어지러워요.",
+    "variants": [
+      "핑 돌아요","빙빙 돌아요","머리가 멍해요","기절할 것 같아요","휘청거려요","눈앞이 캄캄",
+      "현기증 나요","머리가 핑핑 돈다","어지버벙","어지럽다예","빙빙 돈다잉","머리가 띵허네"
+    ]
+  },
+  {
+    "category": "두통",
+    "standard": "머리가 아파요.",
+    "variants": [
+      "머리 지끈","깨질 듯 아파요","두통 있어요","머리가 띵해요","머리가 울려요","머리 뻐근해요",
+      "머리 깨질랑께","머리 찡허다","머리 쪼개지겄네","머리 지끈허이","머리 아푸"
+    ]
+  },
+  {
+    "category": "근·골격 통증",
+    "standard": "허리가 아파요.",
+    "variants": [
+      "허리 끊어질 듯","허리 뻐근","허리 삐끗","허리 욱신","허리아프다예",
+      "허리 휘어지겄다","허리 뻐근허네","허리 아쎄","허리 댕겨요"
+    ]
+  },
+  {
+    "category": "구강/의치",
+    "standard": "틀니가 불편해요.",
+    "variants": [
+      "의치가 아파요","이가 헐거워요","의치가 자꾸 빠져요","잇몸이 쓸려요","입안이 헐었어요",
+      "이 불편해","입이 아파요","이 덜렁덜렁",
+      "틀니가 들썩하네예","이가 덜그럭덜그럭혀","틀니가 영 불편허네","이 빠질랑말랑","의치 덜컹","이 시리다"
+    ]
+  },
+  {
+    "category": "구강건조/갈증",
+    "standard": "입이 말라요.",
+    "variants": [
+      "목말라요","물 좀 주세요","입이 바짝바짝해요","입마름 심해요","목이 칼칼해요",
+      "물 줘요","물 좀 보소","물 좀 주이소","목 마른다예","목 타분다잉","목이 칼칼허네"
+    ]
+  },
+  {
+    "category": "음료요청",
+    "standard": "물 좀 주세요.",
+    "variants": [
+      "물 주세요","물 한 컵","목말라요","물 좀 보소","물 좀 주이소","물 좀","물…","챙겨줘요 물",
+      "물 다오","물 줘","목 축이자","물 한잔 주소","물 좀 주쇼잉","물 좀 주시유"
+    ]
+  },
+  {
+    "category": "배뇨/화장실",
+    "standard": "화장실 가고 싶어요.",
+    "variants": [
+      "볼일 좀 볼래요","쉬 마려워요","오줌 급해요","화장실 어디예요","급해요",
+      "뇨 급하다","빨리 좀 데려가요","화장실 좀",
+      "볼일 좀 보이소","화장실 가고 싶당께","화장실 가야허는디","쉬야 마려워","오줌 마렵다"
+    ]
+  },
+  {
+    "category": "배변",
+    "standard": "배변이 안 나와요.",
+    "variants": [
+      "변이 안 나와요","변비예요","배가 더부룩해요","화장실 가도 시원치 않아요","응가 안 나와요",
+      "똥이 안 나온다","배가 더부룩허네","응가가 안돼예","똥 마려운데 안 나와부러"
+    ]
+  },
+  {
+    "category": "소화기/구역",
+    "standard": "메스꺼워요.",
+    "variants": [
+      "구역질나요","토할 것 같아요","속이 매스꺼워요","울렁거려요","역겹다",
+      "토쏠린다","토할락해예","속이 울렁잉","속이 니글대유"
+    ]
+  },
+  {
+    "category": "발열/오한",
+    "standard": "몸이 으슬으슬 떨려요.",
+    "variants": [
+      "오한이 와요","몸이 뜨거워요","열이 나는 것 같아요","몸살 같아요","몸이 쑤셔요",
+      "몸 시리다","몸이 후끈","몸이 뜨겁다예","몸살 난거 같당께"
+    ]
+  },
+  {
+    "category": "저혈당/허기",
+    "standard": "힘이 없어요.",
+    "variants": [
+      "기운이 쭉 빠져요","어질어질해요","당 떨어진 것 같아요","속이 울렁","손이 떨려요",
+      "힘이 쭉 빠졌다예","힘이 허하다","기운이 없당께","힘이 다 나가부렀어"
+    ]
+  },
+  {
+    "category": "온·냉불편",
+    "standard": "춥습니다.",
+    "variants": [
+      "덥습니다","냉기 들어요","덥고 답답해요","이불 좀 더","에어컨/난방 부탁해요",
+      "추워죽겄다","덥다예","춥다잉","춥다유","덥네예"
+    ]
+  },
+  {
+    "category": "주사/약",
+    "standard": "주사가 아파요.",
+    "variants": [
+      "주사 놓지 마요","약 주세요","진통제 좀","약 시간 됐나요","약이 속쓰려요","약 먹고 어지러워요",
+      "주사 아프다예","약 좀 주소","약 좀 주쇼잉","약 좀 주시유"
+    ]
+  },
+  {
+    "category": "체위변경/이동",
+    "standard": "자리를 좀 옮겨주세요.",
+    "variants": [
+      "돌려주세요","눕는 자세 바꿔요","허리가 아파서 뒤척여요","휠체어로 갈래요","침대 머리 올려요",
+      "자리 옮겨주소","눕는 거 바꿔주소","뒤척여 주쇼잉","침상 올려주이소"
+    ]
+  },
+  {
+    "category": "수면",
+    "standard": "잠이 안 와요.",
+    "variants": [
+      "잠 설쳐요","깨다 자다 해요","코골이 심해요","밤에 뒤척여요","불면이네요",
+      "잠이 안 온다예","잠이 뒤숭숭해요","잠을 못 자겄네","잠이 허벌나게 안 와유"
+    ]
+  },
+  {
+    "category": "불안/정서",
+    "standard": "괜히 불안해요.",
+    "variants": [
+      "초조해요","마음이 싱숭생숭","괜히 겁나요","예민해요","심장이 두근거려요",
+      "불안허다예","마음이 두근댄다잉","마음이 싱숭생숭허네","괜히 불안허유"
+    ]
+  },
+  {
+    "category": "행정/순서",
+    "standard": "진료 순서가 언제인가요?",
+    "variants": [
+      "제 차례 언제예요","얼마나 기다려요","번호표 몇 번이에요","대기 오래 걸리나요","순서 좀 알려줘요",
+      "내 차례 언제다예","내 순서가 몇 번이여","얼마나 기다려야 쓰까","진료 언제쯤이유"
+    ]
+  },
+  {
+    "category": "행정/결과",
+    "standard": "검사 결과는 언제 나오나요?",
+    "variants": [
+      "결과 언제 봐요","찍은 거 결과 나왔나요","피검사 언제요","영상 결과 확인됐나요",
+      "결과 언제나온다예","검사 결과 언제당가","검사 언제 나오유"
+    ]
+  },
+  {
+    "category": "의료진 호출",
+    "standard": "선생님은 언제 오시나요?",
+    "variants": [
+      "의사 언제 와요","간호사 좀 불러주세요","누구 안 오시나요","벨 안 되나요",
+      "의사 언제온다예","간호사 불러주쇼","간호사 안 오시나잉","벨이 안 눌러져유"
+    ]
+  },
+  {
+    "category": "입원/퇴원",
+    "standard": "퇴원은 언제 가능해요?",
+    "variants": [
+      "언제 나가요","입원 절차가 어떻게 돼요","수납은 어디서 하나요","보호자 서류 뭐 필요해요",
+      "언제 퇴원한다예","입원 절차 좀 알려주쇼","수납은 어디다잉","퇴원 언제쯤이유"
+    ]
+  },
+  {
+    "category": "상처/출혈",
+    "standard": "여기 피가 나요.",
+    "variants": [
+      "거즈에 피 묻어요","상처 벌어진 것 같아요","고름 나와요","봉합 터진 것 같아요",
+      "피난다예","상처가 터졌다잉","피가 철철 난다","상처가 벌어져부렀어"
+    ]
+  },
+  {
+    "category": "붓기",
+    "standard": "다리가 부었어요.",
+    "variants": [
+      "발/종아리 붓기","푸석푸석 부어요","무겁고 당겨요","한쪽만 부어요",
+      "다리 붓는다예","발이 퉁퉁 붓잉","다리 뻐근허네","다리 퉁퉁 부었어유"
+    ]
+  }
 ];
 function localIntentMatch(text){
   const t=(text||"").toLowerCase();
@@ -268,10 +422,11 @@ function localIntentMatch(text){
 }
 
 /* -----------------------------
-   2) 데모용 환자 데이터
+   2) 데모용 환자 데이터 (실제에선 DB/RAG)
 ------------------------------*/
 const DEMO = {
-  p001:{ rx:[
+  p001:{
+    rx:[
       {date:"2025-06-10", dx:"상복부 통증(위염 의심)", drug:"PPI(esomeprazole 20mg)", dose:"1정 qd 아침 식전", doctor:"정OO"},
       {date:"2025-03-02", dx:"구강 통증(의치 압통)",   drug:"Acetaminophen 500mg",   dose:"1정 tid 필요시", doctor:"유OO"},
       {date:"2024-12-21", dx:"탈수 의심",              drug:"ORS 경구수액",          dose:"포 1개 필요시",  doctor:"정OO"},
@@ -284,7 +439,8 @@ const DEMO = {
       {text:"목 타 죽겠다 아이가", context:"더위/탈수 의심", tags:["음료요청"], score:0.74},
     ]
   },
-  p002:{ rx:[
+  p002:{
+    rx:[
       {date:"2025-07-01", dx:"요로감염 치료", drug:"Ciprofloxacin 250mg", dose:"1정 bid 7일", doctor:"박OO"},
       {date:"2025-01-14", dx:"무릎 통증", drug:"NSAIDs(Naproxen 250mg)", dose:"1정 bid 식후", doctor:"김OO"},
     ],
@@ -294,7 +450,8 @@ const DEMO = {
       {text:"이가 헐거워서 밥을 못 먹어", context:"영양 섭취곤란", tags:["구강/의치"], score:0.76},
     ]
   },
-  p003:{ rx:[
+  p003:{
+    rx:[
       {date:"2025-05-09", dx:"요통", drug:"Acetaminophen 500mg", dose:"1정 tid", doctor:"남OO"},
     ],
     speech:[
@@ -305,16 +462,22 @@ const DEMO = {
 };
 
 /* -----------------------------
-   3) 백엔드 연동 훅(모의)
+   3) (선택) 백엔드 연동 훅
+   실제 서비스에선 이 자리에 fetch('/api/rag/...') 사용
 ------------------------------*/
 async function fetchPrescriptions(patientId, query){
+  // const r = await fetch('/api/rag/prescriptions',{method:'POST',headers:{'Content-Type':'application/json'}, body:JSON.stringify({patientId, query})});
+  // return await r.json();
   const rows = (DEMO[patientId]?.rx||[])
     .filter(r=>!query || JSON.stringify(r).toLowerCase().includes(query.toLowerCase()));
   return rows;
 }
 async function fetchSpeechRAG(patientId, query, topK=5){
+  // const r = await fetch('/api/rag/speech',{method:'POST',headers:{'Content-Type':'application/json'}, body:JSON.stringify({patientId, query, topK})});
+  // return await r.json();
   let items = (DEMO[patientId]?.speech||[]);
   if(query){
+    // 간단 키워드 가중치
     const q = query.toLowerCase();
     items = items.map(o=>{
       const hit = (o.text+o.context+o.tags.join(',')).toLowerCase().includes(q);
@@ -337,9 +500,8 @@ let recognizing=false, recognition=null;
 
 function appendLog(text, final=false){
   const line=document.createElement('div'); line.className='mb-1';
-  const badge = final
-    ? '<span class="text-xs px-2 py-0.5 rounded-full bg-indigo-500/30 border border-indigo-400/30 mr-2">확정</span>'
-    : '<span class="text-xs px-2 py-0.5 rounded-full bg-slate-500/30 border border-slate-400/30 mr-2">부분</span>';
+  const badge = final? '<span class="text-xs px-2 py-0.5 rounded-full bg-indigo-500/30 border border-indigo-400/30 mr-2">확정</span>'
+                     : '<span class="text-xs px-2 py-0.5 rounded-full bg-slate-500/30 border border-slate-400/30 mr-2">부분</span>';
   line.innerHTML = badge + `<span class="${final?'text-indigo-200':'text-slate-300'}">${escapeHTML(text)}</span>`;
   log.appendChild(line); log.scrollTop = log.scrollHeight;
 }
@@ -374,20 +536,9 @@ async function runRAG(){
   renderRx(rx, q); renderSpeech(sp, q);
 }
 btnRag.addEventListener('click', runRAG);
+patientSelect.addEventListener('change', runRAG);
 topK.addEventListener('change', runRAG);
 ragQuery.addEventListener('keydown', (e)=>{ if(e.key==='Enter') runRAG(); });
-
-// (3) 환자 변경 시 placeholder 힌트 동적 갱신 ✅ 추가
-patientSelect.addEventListener('change', ()=>{
-  const pid = patientSelect.value;
-  const hintTerms = extractKeywordsFromText(
-    (DEMO[pid]?.rx.map(r=>`${r.dx} ${r.drug}`).join(' ')||'') + ' ' +
-    (DEMO[pid]?.speech.map(s=>`${s.text} ${s.context}`).join(' ')||'')
-  ).slice(0,3);
-  ragQuery.placeholder = hintTerms.length ? `RAG 키워드(예: ${hintTerms.join(', ')})`
-                                          : 'RAG 키워드(예: 물, 복통, 틀니)';
-  runRAG();
-});
 
 /* -----------------------------
    5) (데모) Web Speech API
@@ -421,27 +572,6 @@ function initRecognition(){
       intentEl.textContent = r.category||'-';
       cluesEl.textContent = r.clues?.join(', ')||'-';
       confEl.textContent = `신뢰도: ${Math.round((r.confidence||0)*100)}%`;
-
-      // (2) 인식 결과에서 자동 업데이트 훅 ✅ 추가
-      const pid = patientSelect.value;
-      const baseTerms = [];
-      if(r.category && r.category !== '-') baseTerms.push(r.category);
-      if(r.standard && r.standard !== '-') baseTerms.push(r.standard);
-      const terms = Array.from(new Set([
-        ...extractKeywordsFromText(finalText),
-        ...extractKeywordsFromText(baseTerms.join(' '))
-      ]));
-      const rel = relevanceToPatient(pid, terms);
-      if(rel >= 1){
-        const pick = terms
-          .sort((a,b)=>{
-            const aSyn = SYN[a]?1:0, bSyn = SYN[b]?1:0;
-            if(aSyn!==bSyn) return bSyn-aSyn;
-            return b.length - a.length;
-          })
-          .slice(0,3);
-        mergeRagAndRun(pick);
-      }
     }
   };
   return rec;
@@ -460,18 +590,8 @@ btnCopy.addEventListener('click', ()=>{
 });
 btnClear.addEventListener('click', ()=>{ log.innerHTML=''; liveText.textContent=''; stdText.textContent='-'; intentEl.textContent='-'; cluesEl.textContent='-'; confEl.textContent='신뢰도: -'; });
 
-// 초기 로드
-(function init(){
-  // 시작 시 환자 힌트 placeholder 설정
-  const pid = patientSelect.value;
-  const hintTerms = extractKeywordsFromText(
-    (DEMO[pid]?.rx.map(r=>`${r.dx} ${r.drug}`).join(' ')||'') + ' ' +
-    (DEMO[pid]?.speech.map(s=>`${s.text} ${s.context}`).join(' ')||'')
-  ).slice(0,3);
-  ragQuery.placeholder = hintTerms.length ? `RAG 키워드(예: ${hintTerms.join(', ')})`
-                                          : 'RAG 키워드(예: 물, 복통, 틀니)';
-  runRAG();
-})();
+/* 초기 로드 시 기본 RAG 채움 */
+runRAG();
 </script>
 </body>
 </html>
