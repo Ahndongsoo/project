@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>헤아림 — 노인 발음 번역기 + RAG 패널</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root{ --ring:#60A5FA }
+  html,body{background:linear-gradient(160deg,#0b1020,#101836 40%,#0b1020); color:#e5e7eb}
+  .glass{background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.08); backdrop-filter: blur(10px)}
+  .focus-ring:focus-visible{outline:3px solid var(--ring); outline-offset:2px; border-radius:12px}
+  .bar{width:4px; border-radius:2px; animation:wave 1200ms ease-in-out infinite}
+  .bar:nth-child(odd){animation-delay:300ms}
+  .bar:nth-child(3n){animation-delay:600ms}
+  @keyframes wave{0%,100%{height:6px} 50%{height:28px}}
+  .pulse::after{content:""; position:absolute; inset:-8px; border-radius:9999px; border:2px solid rgba(99,102,241,.5); animation:pulse 1.6s infinite}
+  @keyframes pulse{0%{opacity:.7; transform:scale(.9)}70%{opacity:0; transform:scale(1.15)}100%{opacity:0}}
+  mark{background:rgba(250,204,21,.35); padding:0 .2em; border-radius:.25rem}
+  .shadow-scroll{mask-image: linear-gradient(to bottom, transparent 0, black 18px, black calc(100% - 18px), transparent 100%)}
+  .scalable{font-size:clamp(18px,2.2vw,28px); line-height:1.4}
+  .scalable-sm{font-size:clamp(14px,1.2vw,18px); line-height:1.4}
+  .badge{font-size:12px; padding:.2rem .5rem; border-radius:999px; border:1px solid rgba(255,255,255,.2)}
+</style>
+</head>
+<body>
+  <!-- HEADER -->
+  <header class="max-w-7xl mx-auto px-4 pt-6 pb-4">
+    <div class="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="h-9 w-9 rounded-xl bg-indigo-500/20 grid place-items-center">
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
+            <path d="M12 3v10a4 4 0 1 1-8 0" stroke="#93a4ff" stroke-width="2" stroke-linecap="round"/>
+            <rect x="10" y="2" width="4" height="12" rx="2" fill="#93a4ff"/>
+            <path d="M5 13v2a7 7 0 0 0 14 0v-2" stroke="#93a4ff" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-xl sm:text-2xl font-semibold">헤아림 — 노인 발음 번역기</h1>
+          <p class="text-slate-400 text-sm">RAG로 개인별 과거 이력/언어데이터까지 한 화면에</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <select id="langSelect" class="glass px-3 py-2 rounded-xl"> 
+          <option value="ko-KR" selected>한국어 (ko-KR)</option>
+          <option value="en-US">영어 (en-US)</option>
+        </select>
+        <button id="btnStart" class="relative pulse px-4 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 focus-ring">🎙️ 시작</button>
+        <button id="btnStop" class="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 focus-ring">⏹️ 정지</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN GRID -->
+  <main class="max-w-7xl mx-auto px-4 pb-28">
+    <div class="grid lg:grid-cols-3 gap-6">
+      <!-- LEFT: MIC -->
+      <section class="glass rounded-2xl p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-semibold">입력 장치</h2>
+          <div class="flex items-center gap-2 text-sm text-slate-300">
+            <div id="micDot" class="h-3 w-3 rounded-full bg-slate-500"></div> 마이크
+          </div>
+        </div>
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div class="rounded-2xl border border-white/10 p-4 bg-white/5">
+            <div class="h-16 flex items-end gap-1">
+              <div class="bar bg-indigo-400"></div><div class="bar bg-indigo-400"></div><div class="bar bg-indigo-400"></div>
+              <div class="bar bg-indigo-400"></div><div class="bar bg-indigo-400"></div><div class="bar bg-indigo-400"></div>
+              <div class="bar bg-indigo-400"></div><div class="bar bg-indigo-400"></div><div class="bar bg-indigo-400"></div>
+              <div class="bar bg-indigo-400"></div>
+            </div>
+            <p class="text-xs text-slate-400 mt-2">* 접근성 중심 간단 시각화</p>
+          </div>
+          <div class="rounded-2xl border border-white/10 p-4 bg-white/5">
+            <div class="text-sm text-slate-300 mb-2">빠른 문구(테스트)</div>
+            <div class="flex flex-wrap gap-2">
+              <button class="quick glass px-3 py-2 rounded-xl text-sm" data-utter="물 좀... 줘보소...">“물 좀... 줘보소...”</button>
+              <button class="quick glass px-3 py-2 rounded-xl text-sm" data-utter="배가 찌릿해요...">“배가 찌릿해요…”</button>
+              <button class="quick glass px-3 py-2 rounded-xl text-sm" data-utter="의치가 계속 빠져요">“의치가 계속 빠져요”</button>
+              <button class="quick glass px-3 py-2 rounded-xl text-sm" data-utter="화장실 어디… 급해요">“화장실 어디… 급해요”</button>
+            </div>
+          </div>
+        </div>
+        <ul class="text-slate-300 text-sm list-disc ml-5 mt-4">
+          <li>짧고 천천히 말씀해 주세요.</li>
+          <li>주변 소음을 줄이면 인식률이 올라갑니다.</li>
+        </ul>
+      </section>
+
+      <!-- CENTER: LIVE CAPTION -->
+      <section class="glass rounded-2xl p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-semibold">실황 캡션(원문)</h2>
+          <div class="flex items-center gap-3">
+            <label class="text-sm text-slate-300">글자 크기</label>
+            <input id="fontRange" type="range" min="16" max="36" value="26" class="w-32"/>
+          </div>
+        </div>
+        <div id="liveText" class="scalable min-h-[160px] rounded-xl border border-white/10 p-4 bg-black/20"></div>
+        <div class="mt-4 flex items-center justify-between">
+          <div class="text-slate-300 text-sm">부분결과는 회색, 확정문장은 파란색으로 로그에 저장됩니다.</div>
+          <div class="flex gap-2">
+            <button id="btnCopy"  class="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm">복사</button>
+            <button id="btnClear" class="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm">초기화</button>
+          </div>
+        </div>
+        <div id="log" class="mt-3 max-h-40 overflow-auto pr-2 shadow-scroll"></div>
+      </section>
+
+      <!-- RIGHT: TRANSLATION + INTENT + PATIENT PICKER -->
+      <section class="glass rounded-2xl p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-semibold">표준문장 & 의도</h2>
+          <span id="confidence" class="text-sm text-slate-400">신뢰도: -</span>
+        </div>
+        <div class="rounded-2xl border border-white/10 p-4 bg-white/5">
+          <div class="text-slate-400 text-sm mb-1">표준문장</div>
+          <div id="stdText" class="scalable text-indigo-200 font-medium">-</div>
+        </div>
+        <div class="grid sm:grid-cols-2 gap-3 mt-3">
+          <div class="rounded-2xl border border-white/10 p-4 bg-white/5">
+            <div class="text-slate-400 text-sm mb-1">의도(카테고리)</div>
+            <div id="intent" class="text-lg">-</div>
+          </div>
+          <div class="rounded-2xl border border-white/10 p-4 bg-white/5">
+            <div class="text-slate-400 text-sm mb-1">단서(매칭어)</div>
+            <div id="clues" class="scalable-sm text-slate-200">-</div>
+          </div>
+        </div>
+
+        <hr class="my-4 border-white/10">
+        <div class="flex flex-col gap-2">
+          <div class="text-slate-300 text-sm">환자 선택</div>
+          <div class="flex gap-2">
+            <select id="patientSelect" class="glass px-3 py-2 rounded-xl grow">
+              <option value="p001" selected>p001 — 김OO(78세, F)</option>
+              <option value="p002">p002 — 박OO(82세, F)</option>
+              <option value="p003">p003 — 이OO(76세, M)</option>
+            </select>
+            <input id="ragQuery" placeholder="RAG 키워드(예: 물, 복통, 틀니)" class="glass px-3 py-2 rounded-xl w-40"/>
+            <button id="btnRag" class="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500">RAG 검색</button>
+          </div>
+          <p class="text-xs text-slate-400">* 실제 서비스에선 인증·접근권한·감사로그 등 PHI 보호 필수</p>
+        </div>
+      </section>
+    </div>
+
+    <!-- BOTTOM: RAG PANELS -->
+    <section class="glass rounded-2xl p-5 mt-6">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-semibold">개인별 과거 처방 이력</h2>
+        <span id="rxCount" class="badge">0건</span>
+      </div>
+      <div class="overflow-auto rounded-xl border border-white/10">
+        <table class="min-w-full text-sm">
+          <thead class="bg-white/5">
+            <tr class="text-left">
+              <th class="px-3 py-2">날짜</th>
+              <th class="px-3 py-2">진단/증상</th>
+              <th class="px-3 py-2">처방약(성분)</th>
+              <th class="px-3 py-2">용법</th>
+              <th class="px-3 py-2">담당의</th>
+            </tr>
+          </thead>
+          <tbody id="rxBody" class="divide-y divide-white/10"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="glass rounded-2xl p-5 mt-6">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-semibold">개인별 과거 언어데이터 (RAG Top-K)</h2>
+        <div class="flex items-center gap-2">
+          <span class="text-slate-300 text-sm">K</span>
+          <input id="topK" type="number" min="1" max="10" value="5" class="glass w-16 px-2 py-1 rounded-lg"/>
+        </div>
+      </div>
+      <div id="speechList" class="grid md:grid-cols-2 gap-3"></div>
+    </section>
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="max-w-7xl mx-auto px-4 py-6 text-center text-slate-500 text-sm">
+    © 2025 헤아림 — 실험적 데모. 실제 운영 시 개인정보보호/동의/접근통제 필수.
+  </footer>
+
+<script>
+/* -----------------------------
+   0) 공통 유틸
+------------------------------*/
+const $ = (s)=>document.querySelector(s);
+const escapeHTML = s => (s||"").replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;', "'":'&#39;'}[m]));
+const highlight = (text, q) => {
+  if(!q) return escapeHTML(text);
+  const re = new RegExp('('+q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi');
+  return escapeHTML(text).replace(re,'<mark>$1</mark>');
+};
+
+/* -----------------------------
+   (1) 유틸 & 간단 동의어 사전  ✅ 추가
+------------------------------*/
+function splitKeywords(q){ return (q||'').split(/[,/ ]+/).map(s=>s.trim()).filter(Boolean); }
+const SYN = {
+  "물":["물","갈증","목마름","입마름","수분","경구수액","ORS"],
+  "복통":["복통","배아픔","속쓰림","위염","명치","상복부","PPI","에소메프라졸","esomeprazole"],
+  "틀니":["틀니","의치","잇몸","구강","씹기","의치압통"],
+  "화장실":["화장실","배뇨","오줌","쉬야","요로","요로감염","UTI"],
+  "허리":["허리","요통"],
+  "약":["약","진통제","아세트아미노펜","acetaminophen","NSAIDs","나프록센","naproxen"],
+  "항생제":["항생제","Ciprofloxacin","시프로플록사신","Cipro"]
+};
+function extractKeywordsFromText(s){
+  const t=(s||'').toLowerCase();
+  const base=[];
+  Object.keys(SYN).forEach(k=>{
+    if([k,...SYN[k].map(x=>x.toLowerCase())].some(w=>t.includes(w))) base.push(k);
+  });
+  const toks=(t.match(/[가-힣A-Za-z0-9]+/g)||[])
+    .filter(x=>x.length>=2)
+    .filter(x=>!['입니다','하세요','그리고','오늘','좀','조금','정말'].includes(x));
+  const bag=Array.from(new Set([...base,...toks])).slice(0,8);
+  const expanded=new Set();
+  bag.forEach(k=>{
+    expanded.add(k);
+    if(SYN[k]) SYN[k].forEach(v=>expanded.add(v.toLowerCase()));
+  });
+  return Array.from(expanded);
+}
+function relevanceToPatient(pid, terms){
+  const P = DEMO[pid]||{rx:[],speech:[]};
+  const blob = [
+    ...P.rx.map(r=>`${r.dx} ${r.drug} ${r.dose} ${r.doctor}`),
+    ...P.speech.map(s=>`${s.text} ${s.context} ${(s.tags||[]).join(' ')}`)
+  ].join(' ').toLowerCase();
+  let score=0;
+  terms.forEach(t=>{ if(blob.includes(t.toLowerCase())) score++; });
+  return score;
+}
+function mergeRagAndRun(terms){
+  const cur = splitKeywords(ragQuery.value.toLowerCase());
+  const merged = Array.from(new Set([...cur, ...terms.map(t=>t.toLowerCase())]))
+    .filter(Boolean).slice(0,10);
+  ragQuery.value = merged.join(', ');
+  runRAG();
+}
+
+/* -----------------------------
+   1) 의도 규칙 (간단 데모) - 원본 그대로
+------------------------------*/
+const KB = [
+  /* ... (생략: 원본 KB 배열 그대로) ... */
+  {"category":"붓기","standard":"다리가 부었어요.","variants":["발/종아리 붓기","푸석푸석 부어요","무겁고 당겨요","한쪽만 부어요","다리 붓는다예","발이 퉁퉁 붓잉","다리 뻐근허네","다리 퉁퉁 부었어유"]}
+];
+function localIntentMatch(text){
+  const t=(text||"").toLowerCase();
+  let best={category:"-",standard:"-",clues:[],score:0};
+  for(const item of KB){
+    let score=0, clues=[];
+    for(const v of item.variants){
+      const vv=v.replace(/\s+/g,"").toLowerCase();
+      if(t.includes(vv) || t.includes(v.toLowerCase())){ score++; clues.push(v); }
+    }
+    if(score>best.score) best={category:item.category, standard:item.standard, clues, score};
+  }
+  const conf=best.score===0?0.2:Math.min(0.2+best.score*0.2,0.95);
+  return {...best, confidence: conf};
+}
+
+/* -----------------------------
+   2) 데모용 환자 데이터
+------------------------------*/
+const DEMO = {
+  p001:{ rx:[
+      {date:"2025-06-10", dx:"상복부 통증(위염 의심)", drug:"PPI(esomeprazole 20mg)", dose:"1정 qd 아침 식전", doctor:"정OO"},
+      {date:"2025-03-02", dx:"구강 통증(의치 압통)",   drug:"Acetaminophen 500mg",   dose:"1정 tid 필요시", doctor:"유OO"},
+      {date:"2024-12-21", dx:"탈수 의심",              drug:"ORS 경구수액",          dose:"포 1개 필요시",  doctor:"정OO"},
+    ],
+    speech:[
+      {text:"몰줌… 목이 칼칼하다 카이", context:"오후 외래 대기 중 물 요청", tags:["음료요청"], score:0.86},
+      {text:"이가 덜그럭거리고 씹기 힘들어예", context:"의치 불편 호소", tags:["구강/의치"], score:0.82},
+      {text:"속이 쓰려가꼬 밥 맛이 없데이", context:"소화불량/위염 의심", tags:["통증"], score:0.79},
+      {text:"볼일 좀 급한데 화장실 어딥니꺼", context:"화장실 위치 문의", tags:["화장실"], score:0.77},
+      {text:"목 타 죽겠다 아이가", context:"더위/탈수 의심", tags:["음료요청"], score:0.74},
+    ]
+  },
+  p002:{ rx:[
+      {date:"2025-07-01", dx:"요로감염 치료", drug:"Ciprofloxacin 250mg", dose:"1정 bid 7일", doctor:"박OO"},
+      {date:"2025-01-14", dx:"무릎 통증", drug:"NSAIDs(Naproxen 250mg)", dose:"1정 bid 식후", doctor:"김OO"},
+    ],
+    speech:[
+      {text:"물 한 잔만 주소", context:"접수 창구", tags:["음료요청"], score:0.81},
+      {text:"쉬 마려워요…", context:"진료 전", tags:["화장실"], score:0.78},
+      {text:"이가 헐거워서 밥을 못 먹어", context:"영양 섭취곤란", tags:["구강/의치"], score:0.76},
+    ]
+  },
+  p003:{ rx:[
+      {date:"2025-05-09", dx:"요통", drug:"Acetaminophen 500mg", dose:"1정 tid", doctor:"남OO"},
+    ],
+    speech:[
+      {text:"배가 찌릿하네", context:"응급실 트리아지", tags:["통증"], score:0.69},
+      {text:"화장실… 급해요", context:"복도", tags:["화장실"], score:0.67},
+    ]
+  }
+};
+
+/* -----------------------------
+   3) 백엔드 연동 훅(모의)
+------------------------------*/
+async function fetchPrescriptions(patientId, query){
+  const rows = (DEMO[patientId]?.rx||[])
+    .filter(r=>!query || JSON.stringify(r).toLowerCase().includes(query.toLowerCase()));
+  return rows;
+}
+async function fetchSpeechRAG(patientId, query, topK=5){
+  let items = (DEMO[patientId]?.speech||[]);
+  if(query){
+    const q = query.toLowerCase();
+    items = items.map(o=>{
+      const hit = (o.text+o.context+o.tags.join(',')).toLowerCase().includes(q);
+      return {...o, score: o.score + (hit?0.05:0)};
+    });
+  }
+  return items.sort((a,b)=>b.score-a.score).slice(0, topK);
+}
+
+/* -----------------------------
+   4) UI 바인딩
+------------------------------*/
+const liveText = $('#liveText'), log = $('#log'), stdText = $('#stdText'), intentEl = $('#intent'), cluesEl = $('#clues'), confEl = $('#confidence');
+const micDot = $('#micDot'); const btnStart = $('#btnStart'); const btnStop = $('#btnStop'); const fontRange = $('#fontRange'); const langSelect = $('#langSelect');
+const btnCopy = $('#btnCopy'); const btnClear = $('#btnClear');
+const patientSelect = $('#patientSelect'); const ragQuery = $('#ragQuery'); const btnRag = $('#btnRag'); const rxBody = $('#rxBody'); const rxCount = $('#rxCount');
+const speechList = $('#speechList'); const topK = $('#topK');
+
+let recognizing=false, recognition=null;
+
+function appendLog(text, final=false){
+  const line=document.createElement('div'); line.className='mb-1';
+  const badge = final
+    ? '<span class="text-xs px-2 py-0.5 rounded-full bg-indigo-500/30 border border-indigo-400/30 mr-2">확정</span>'
+    : '<span class="text-xs px-2 py-0.5 rounded-full bg-slate-500/30 border border-slate-400/30 mr-2">부분</span>';
+  line.innerHTML = badge + `<span class="${final?'text-indigo-200':'text-slate-300'}">${escapeHTML(text)}</span>`;
+  log.appendChild(line); log.scrollTop = log.scrollHeight;
+}
+function setMic(on){ micDot.className='h-3 w-3 rounded-full '+(on?'bg-emerald-400':'bg-slate-500'); }
+
+function renderRx(rows, q){
+  rxBody.innerHTML = rows.map(r=>`
+    <tr>
+      <td class="px-3 py-2 whitespace-nowrap">${highlight(r.date,q)}</td>
+      <td class="px-3 py-2">${highlight(r.dx,q)}</td>
+      <td class="px-3 py-2">${highlight(r.drug,q)}</td>
+      <td class="px-3 py-2">${highlight(r.dose,q)}</td>
+      <td class="px-3 py-2 whitespace-nowrap">${highlight(r.doctor,q)}</td>
+    </tr>`).join('');
+  rxCount.textContent = `${rows.length}건`;
+}
+function renderSpeech(items, q){
+  speechList.innerHTML = items.map(o=>`
+    <div class="rounded-xl border border-white/10 p-4 bg-white/5">
+      <div class="flex items-center justify-between mb-1">
+        <div class="badge">${(o.score*100).toFixed(0)}점</div>
+        <div class="text-xs text-slate-400">${o.tags.map(t=>`#${t}`).join(' ')}</div>
+      </div>
+      <div class="font-medium mb-1">${highlight(o.text,q)}</div>
+      <div class="text-sm text-slate-300">맥락: ${highlight(o.context,q)}</div>
+    </div>`).join('');
+}
+
+async function runRAG(){
+  const pid = patientSelect.value, q = ragQuery.value.trim();
+  const [rx, sp] = await Promise.all([fetchPrescriptions(pid,q), fetchSpeechRAG(pid,q, +topK.value || 5)]);
+  renderRx(rx, q); renderSpeech(sp, q);
+}
+btnRag.addEventListener('click', runRAG);
+topK.addEventListener('change', runRAG);
+ragQuery.addEventListener('keydown', (e)=>{ if(e.key==='Enter') runRAG(); });
+
+// (3) 환자 변경 시 placeholder 힌트 동적 갱신 ✅ 추가
+patientSelect.addEventListener('change', ()=>{
+  const pid = patientSelect.value;
+  const hintTerms = extractKeywordsFromText(
+    (DEMO[pid]?.rx.map(r=>`${r.dx} ${r.drug}`).join(' ')||'') + ' ' +
+    (DEMO[pid]?.speech.map(s=>`${s.text} ${s.context}`).join(' ')||'')
+  ).slice(0,3);
+  ragQuery.placeholder = hintTerms.length ? `RAG 키워드(예: ${hintTerms.join(', ')})`
+                                          : 'RAG 키워드(예: 물, 복통, 틀니)';
+  runRAG();
+});
+
+/* -----------------------------
+   5) (데모) Web Speech API
+------------------------------*/
+function initRecognition(){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!SR){ alert("이 브라우저는 실시간 음성 인식을 지원하지 않습니다. Chrome 권장 또는 백엔드 ASR 연결을 사용하세요."); return null; }
+  const rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = langSelect.value||'ko-KR'; rec.maxAlternatives=1;
+  rec.onstart = ()=>{ recognizing=true; setMic(true); };
+  rec.onend   = ()=>{ recognizing=false; setMic(false); };
+  rec.onresult = async (event)=>{
+    let interim='', finalText='';
+    for(let i=event.resultIndex;i<event.results.length;i++){
+      const res=event.results[i]; const t=res[0].transcript.trim();
+      if(res.isFinal){ finalText += t + ' '; } else { interim += t + ' '; }
+    }
+    if(interim){
+      liveText.innerHTML = `<span class="text-slate-300">${escapeHTML(interim)}</span>`;
+      appendLog(interim,false);
+      const r=localIntentMatch(interim);
+      stdText.textContent = r.standard!=="-"?r.standard:interim;
+      intentEl.textContent = r.category||'-';
+      cluesEl.textContent = r.clues?.join(', ')||'-';
+      confEl.textContent = `신뢰도: ${Math.round((r.confidence||0)*100)}%`;
+    }
+    if(finalText){
+      liveText.innerHTML = `<span class="text-indigo-200">${escapeHTML(finalText)}</span>`;
+      appendLog(finalText,true);
+      const r=localIntentMatch(finalText);
+      stdText.textContent = r.standard!=="-"?r.standard:finalText;
+      intentEl.textContent = r.category||'-';
+      cluesEl.textContent = r.clues?.join(', ')||'-';
+      confEl.textContent = `신뢰도: ${Math.round((r.confidence||0)*100)}%`;
+
+      // (2) 인식 결과에서 자동 업데이트 훅 ✅ 추가
+      const pid = patientSelect.value;
+      const baseTerms = [];
+      if(r.category && r.category !== '-') baseTerms.push(r.category);
+      if(r.standard && r.standard !== '-') baseTerms.push(r.standard);
+      const terms = Array.from(new Set([
+        ...extractKeywordsFromText(finalText),
+        ...extractKeywordsFromText(baseTerms.join(' '))
+      ]));
+      const rel = relevanceToPatient(pid, terms);
+      if(rel >= 1){
+        const pick = terms
+          .sort((a,b)=>{
+            const aSyn = SYN[a]?1:0, bSyn = SYN[b]?1:0;
+            if(aSyn!==bSyn) return bSyn-aSyn;
+            return b.length - a.length;
+          })
+          .slice(0,3);
+        mergeRagAndRun(pick);
+      }
+    }
+  };
+  return rec;
+}
+
+btnStart.addEventListener('click', ()=>{
+  if(recognizing) return;
+  recognition = initRecognition();
+  if(recognition){ recognition.lang = langSelect.value; recognition.start(); }
+});
+btnStop.addEventListener('click', ()=>{ if(recognition && recognizing) recognition.stop(); });
+fontRange.addEventListener('input', e=>{ const px=e.target.value+'px'; liveText.style.fontSize=px; stdText.style.fontSize=px; });
+btnCopy.addEventListener('click', ()=>{
+  const texts=[...log.querySelectorAll('div span:last-child')].map(n=>n.textContent.trim()).join('\n');
+  navigator.clipboard.writeText(texts || (liveText.textContent||''));
+});
+btnClear.addEventListener('click', ()=>{ log.innerHTML=''; liveText.textContent=''; stdText.textContent='-'; intentEl.textContent='-'; cluesEl.textContent='-'; confEl.textContent='신뢰도: -'; });
+
+// 초기 로드
+(function init(){
+  // 시작 시 환자 힌트 placeholder 설정
+  const pid = patientSelect.value;
+  const hintTerms = extractKeywordsFromText(
+    (DEMO[pid]?.rx.map(r=>`${r.dx} ${r.drug}`).join(' ')||'') + ' ' +
+    (DEMO[pid]?.speech.map(s=>`${s.text} ${s.context}`).join(' ')||'')
+  ).slice(0,3);
+  ragQuery.placeholder = hintTerms.length ? `RAG 키워드(예: ${hintTerms.join(', ')})`
+                                          : 'RAG 키워드(예: 물, 복통, 틀니)';
+  runRAG();
+})();
+</script>
+</body>
+</html>
